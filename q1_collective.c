@@ -37,54 +37,44 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    double *vector = NULL, *local_vector = NULL;
-    int length, local_length;
+    double *vector = NULL;
+    double *local_vector = NULL;
+    int length = 0, local_length;
 
     if (rank == 0) {
-        // Read the vector from the file
+        // Read the vector from file
         read_vector("input_vector.txt", &vector, &length);
 
         if (length % size != 0) {
             fprintf(stderr, "Vector length must be divisible by number of processes.\n");
             MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
-        local_length = length / size;
-
-        // Distribute parts of the vector
-        for (int i = 1; i < size; i++) {
-            MPI_Send(&local_length, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
-            MPI_Send(vector + i * local_length, local_length, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
-        }
-    } else {
-        MPI_Recv(&local_length, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        local_vector = (double *)malloc(local_length * sizeof(double));
-        MPI_Recv(local_vector, local_length, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
+
+    // Broadcast the length to all processes
+    MPI_Bcast(&length, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    local_length = length / size;
+    local_vector = (double *)malloc(local_length * sizeof(double));
+
+    // Scatter the vector to all processes
+    MPI_Scatter(vector, local_length, MPI_DOUBLE, local_vector, local_length, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
     // Add 1.0 to each local element
-    if (rank == 0) {
-        for (int i = 0; i < local_length; i++) {
-            vector[i] += 1.0;
-        }
-    } else {
-        for (int i = 0; i < local_length; i++) {
-            local_vector[i] += 1.0;
-        }
+    for (int i = 0; i < local_length; i++) {
+        local_vector[i] += 1.0;
     }
 
-    if (rank == 0) {
-        for (int i = 1; i < size; i++) {
-            MPI_Recv(vector + i * local_length, local_length, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
+    // Gather the updated local vectors back to rank 0
+    MPI_Gather(local_vector, local_length, MPI_DOUBLE, vector, local_length, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-        // Write the modified vector to the output file
-        write_vector("output_vector.txt", vector, length);
+    if (rank == 0) {
+        // Write the modified vector to output file
+        write_vector("output_vector_collective.txt", vector, length);
         free(vector);
-    } else {
-        MPI_Send(local_vector, local_length, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
-        free(local_vector);
     }
 
+    free(local_vector);
     MPI_Finalize();
     return 0;
 }
